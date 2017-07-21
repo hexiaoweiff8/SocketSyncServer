@@ -18,37 +18,12 @@ namespace WindowsFormsApplication1
     public partial class SocketServer : Form
     {
 
-        ///// <summary>
-        ///// 最大丢包次数
-        ///// </summary>
-        //private const int MaxLossTime = 5;
-
-        ///// <summary>
-        ///// 帧编号
-        ///// </summary>
-        //private static long FrameNum
-        //{
-        //    get { return frameNum++; }
-        //}
-
-
-        //private static int MemberId
-        //{
-        //    get
-        //    {
-        //        return memberId++;
-        //    }
-        //}
-
         /// <summary>
         /// log
         /// </summary>
         private string log = "";
 
-        /// <summary>
-        /// 帧编号
-        /// </summary>
-        private static long frameNum = 0;
+        // --------------------------常量数据---------------------------
 
         /// <summary>
         /// 单位数据
@@ -61,21 +36,16 @@ namespace WindowsFormsApplication1
         /// </summary>
         private int buffSize = 16384;
 
-        /// <summary>
-        /// 数据缓冲区
-        /// </summary>
-        private byte[] buffer = new byte[0];
-
-        ///// <summary>
-        ///// 未处理数据
-        ///// </summary>
-        //private byte[] unhandleBuffer = new byte[0];
+        // ---------------------------数据缓存---------------------------
 
         /// <summary>
         /// 数据列表字典
         /// 保存每个人的ID以及发送的数据
         /// </summary>
         private List<MsgHead> dataList = new List<MsgHead>();
+
+
+        // --------------------------匹配相关--------------------------
 
         /// <summary>
         /// 匹配列表
@@ -87,20 +57,19 @@ namespace WindowsFormsApplication1
         /// </summary>
         private List<int> unmatchList = new List<int>();
 
-        ///// <summary>
-        ///// Id匹配EndPoint
-        ///// </summary>
-        //private Dictionary<int, EndPoint> idMapEndPointDic = new Dictionary<int, EndPoint>();
+        /// <summary>
+        /// 匹配删除列表
+        /// </summary>
+        private List<int> matchDelList = new List<int>();
 
-        ///// <summary>
-        ///// Id匹配地址与端口
-        ///// </summary>
-        //private Dictionary<int, string> idMapAddressAndPort = new Dictionary<int, string>();
+        /// <summary>
+        /// 匹配数据字典
+        /// 用来缓存尚未匹配的单位列表
+        /// </summary>
+        private Dictionary<int, MsgAskBattleRequest> matchDataDic = new Dictionary<int, MsgAskBattleRequest>();
 
-        ///// <summary>
-        ///// ID匹配丢包次数
-        ///// </summary>
-        //private Dictionary<int, int> idMapNetLossTime = new Dictionary<int, int>();
+
+        // -------------------------链接相关----------------------------
 
         /// <summary>
         /// ID匹配Socket链接
@@ -112,16 +81,6 @@ namespace WindowsFormsApplication1
         /// </summary>
         private Dictionary<string, Socket> ipStringMapSocket = new Dictionary<string, Socket>();
 
-        /// <summary>
-        /// 匹配删除列表
-        /// </summary>
-        private List<int> matchDelList = new List<int>(); 
-
-
-        ///// <summary>
-        ///// 线程列表
-        ///// </summary>
-        //private List<Thread> threadList = new List<Thread>();
 
         /// <summary>
         /// 本地套接字
@@ -188,99 +147,99 @@ namespace WindowsFormsApplication1
             // 连接
             socket.Bind(iep);
             // 开始侦听
-            socket.Listen(20);
+            socket.Listen(10);
             // 控制台输出侦听状态
             AddLog("开始接收链接");
 
             AsyncCallback acceptCallback = null;
             acceptCallback = (ayResult) =>
             {
-                //try
-                //{
-                var aySocket = (Socket) ayResult.AsyncState;
-                var clientSocket = aySocket.EndAccept(ayResult);
-                // 判断是否为重新链接, 如果是则关闭其之前的链接
-                var ipStr = ((IPEndPoint) clientSocket.RemoteEndPoint).Address.ToString();
-                if (!ipStringMapSocket.ContainsKey(ipStr))
+                try
                 {
-                    ipStringMapSocket.Add(ipStr, clientSocket);
-                }
-                else if (ipStringMapSocket[ipStr].Connected)
-                {
-                    ipStringMapSocket[ipStr].Shutdown(SocketShutdown.Both);
-                    ipStringMapSocket[ipStr].Close();
-                    ipStringMapSocket.Remove(ipStr);
-                    ipStringMapSocket.Add(ipStr, clientSocket);
-                }
-                else
-                {
-                    ipStringMapSocket.Remove(ipStr);
-                }
-                // 初始化数据缓冲区
-                buffer = new byte[buffSize];
-
-                AddLog("收到链接");
-                // TODO 链接匹配到ID
-
-                AsyncCallback callback = null;
-                callback = (ia) =>
-                {
-                    try
+                    var aySocket = (Socket) ayResult.AsyncState;
+                    var clientSocket = aySocket.EndAccept(ayResult);
+                    // 判断是否为重新链接, 如果是则关闭其之前的链接
+                    var ipEndPoint = ((IPEndPoint) clientSocket.RemoteEndPoint);
+                    var ipStr = ipEndPoint.Address.ToString() + ":" + ipEndPoint.Port;
+                    if (!ipStringMapSocket.ContainsKey(ipStr))
                     {
-                        // 处理数据
-                        var readSocket = (Socket) ia.AsyncState;
-                        if (readSocket.Connected)
+                        ipStringMapSocket.Add(ipStr, clientSocket);
+                    }
+                    else if (ipStringMapSocket[ipStr].Connected)
+                    {
+                        ipStringMapSocket[ipStr].Shutdown(SocketShutdown.Both);
+                        ipStringMapSocket[ipStr].Close();
+                        ipStringMapSocket.Remove(ipStr);
+                        ipStringMapSocket.Add(ipStr, clientSocket);
+                    }
+                    else
+                    {
+                        ipStringMapSocket.Remove(ipStr);
+                    }
+                    // 初始化数据缓冲区
+                    var buffer = new byte[buffSize];
+
+                    AddLog("收到链接");
+
+                    AsyncCallback callback = null;
+                    callback = (ia) =>
+                    {
+                        try
                         {
-                            var dataLength = readSocket.EndReceive(ia);
-
-                            if (dataLength > 0)
+                            // 处理数据
+                            var readSocket = (Socket) ia.AsyncState;
+                            if (readSocket.Connected)
                             {
-                                // 数据放入缓存区
-                                // 解析数据head
-                                if (ByteUtils.CouldRead(buffer))
+                                var dataLength = readSocket.EndReceive(ia);
+
+                                if (dataLength > 0)
                                 {
-                                    var dataBody = ByteUtils.ReadMsg(ref buffer);
-                                    var head = GetHead(dataBody, dataBody.Length);
-                                    var userId = head.userId;
-                                    // 匹配ID与Socket
-                                    if (!idMapSocket.ContainsKey(userId))
+                                    // 数据放入缓存区
+                                    // 解析数据head
+                                    if (ByteUtils.CouldRead(buffer))
                                     {
-                                        idMapSocket.Add(userId, readSocket);
+                                        var dataBody = ByteUtils.ReadMsg(ref buffer);
+                                        var head = GetHead(dataBody, dataBody.Length);
+                                        var userId = head.userId;
+                                        // 匹配ID与Socket
+                                        if (!idMapSocket.ContainsKey(userId))
+                                        {
+                                            idMapSocket.Add(userId, readSocket);
+                                        }
+                                        // 压入数据到待处理列表
+                                        PushReceivedData(head);
                                     }
-                                    // 压入数据到待处理列表
-                                    PushData(head);
+
+                                    AddLog("收到" + dataLength + "长度数据");
+                                    // 初始化数据缓冲区
+                                    buffer = new byte[buffSize];
                                 }
+                                //else
+                                //{
+                                    // 断线
+                                    //readSocket.Shutdown(SocketShutdown.Both);
+                                    //readSocket.Close();
+                                //}
+                                // 继续接收数据
+                                readSocket.BeginReceive(buffer, 0, buffSize, SocketFlags.None, callback, readSocket);
                             }
-                            else
-                            {
-                                // 断线
-                                readSocket.Shutdown(SocketShutdown.Both);
-                                readSocket.Close();
-                            }
-
-                            AddLog("收到" + dataLength + "长度数据");
-                            // 初始化数据缓冲区
-                            buffer = new byte[buffSize];
-                            // 继续接收数据
-                            readSocket.BeginReceive(buffer, 0, buffSize, SocketFlags.None, callback, readSocket);
                         }
-                    }
-                    catch (Exception e)
-                    {
-                        AddLog(e.Message);
-                    }
+                        catch (Exception e)
+                        {
+                            AddLog("链接已断开");
+                            AddLog(e.Message);
+                        }
 
-                };
-                // 开始接收数据
-                clientSocket.BeginReceive(buffer, 0, buffSize, SocketFlags.None, callback, clientSocket);
-                // 继续接收链接
-                socket.BeginAccept(acceptCallback, socket);
-                //}
-                //catch(Exception e)
-                //{
-                //    AddLog(e.Message);
-                //}
-
+                    };
+                    // 继续接收链接
+                    socket.BeginAccept(acceptCallback, socket);
+                    // 开始接收数据
+                    clientSocket.BeginReceive(buffer, 0, buffSize, SocketFlags.None, callback, clientSocket);
+                }
+                catch (Exception e)
+                {
+                    //AddLog(e.Message);
+                }
             };
             //开始接收链接
             socket.BeginAccept(acceptCallback, socket);
@@ -296,9 +255,11 @@ namespace WindowsFormsApplication1
         {
             MsgHead result = null;
 
-            var stream = new MemoryStream(ByteUtils.GetSubBytes(data, 0, dataLength));
-            // 解析为类
-            result = ProtoBuf.Serializer.Deserialize<MsgHead>(stream);
+            using (var stream = new MemoryStream(ByteUtils.GetSubBytes(data, 0, dataLength)))
+            {
+                // 解析为类
+                result = ProtoBuf.Serializer.Deserialize<MsgHead>(stream);
+            }
 
             return result;
         }
@@ -308,84 +269,196 @@ namespace WindowsFormsApplication1
         /// </summary>
         private void ReadData()
         {
-            // 循环每个人的数据
-            foreach (var head in dataList)
+            lock (dataList)
             {
-                // 客户端UserID
-                var userId = head.userId;
-                // 检查是否在匹配列表里
-                if (!matchDic.ContainsKey(userId))
+                // 循环每个人的数据
+                foreach (var head in dataList)
                 {
-                    // 匹配
-                    // 检查未匹配列表中是否有单位
-                    if (unmatchList.Count > 0)
+                    // 客户端UserID
+                    var userId = head.userId;
+                    // 是否转发到来消息方
+                    var rotateFrom = false;
+                    // 是否转发去消息方
+                    var rotateTo = false;
+
+                    // 复制数据
+                    var copyData = (byte[])head.body.Clone();
+                    // 判断数据类型
+                    switch (head.msgId)
                     {
-                        var matchUserId = unmatchList[0];
-                        if (matchUserId != userId)
+                        case (int)MsgId.MsgOptional:
+                            {
+                                // 转发给匹配玩家
+                                rotateTo = true;
+                                // 解析数据
+                                while (ByteUtils.CouldRead(copyData))
+                                {
+                                    // 操作数据
+                                    var opData = ByteUtils.ReadMsg(ref copyData);
+                                    // 解析为类
+                                    var opMsg = SocketManager.DeSerialize<MsgOptional>(opData);
+                                    AddLog(opMsg.OpPosX + "," + opMsg.OpPosY + "," + opMsg.OpPosZ + ", OpType:" + opMsg.OpType +
+                                           ", OpParams:" + opMsg.OpParams);
+
+                                }
+                                break;
+                            }
+                        case (int)MsgId.MsgComfirmOperation:
+                            {
+                                // 不转发
+                                // 解析数据
+                                while (ByteUtils.CouldRead(copyData))
+                                {
+                                    // 操作数据
+                                    var strData = ByteUtils.ReadMsg(ref copyData);
+                                    // 解析为字符串 字符集: UTF8
+                                    var str = Encoding.UTF8.GetString(strData);
+                                    AddLog(str);
+                                }
+                                break;
+                            }
+                            // 战斗请求数据
+                        case (int)MsgId.MsgAskBattleRequest:
                         {
-                            // 加入匹配列表
-                            unmatchList.RemoveAt(0);
-                            matchDic.Add(matchUserId, userId);
-                            matchDic.Add(userId, matchUserId);
+                            // 读取匹配消息
+                            byte[] msgAskBattleRequestData = ByteUtils.CouldRead(copyData)
+                                ? ByteUtils.ReadMsg(ref copyData)
+                                : null;
+
+                            if (msgAskBattleRequestData == null)
+                            {
+                                AddLog("Error:请求战斗数据为空");
+                                continue;
+                            }
+
+                            // 反序列化战斗请求数据
+                            var msgAskBattleRequest =
+                                SocketManager.DeSerialize<MsgAskBattleRequest>(msgAskBattleRequestData);
+
+                            // 匹配
+                            // 检查是否在匹配列表里
+                            if (!matchDic.ContainsKey(userId))
+                            {
+                                // 检查未匹配列表中是否有单位
+                                if (unmatchList.Count > 0)
+                                {
+                                    var matchUserId = unmatchList[0];
+                                    if (matchUserId != userId)
+                                    {
+                                        // 加入匹配列表
+                                        unmatchList.RemoveAt(0);
+                                        matchDic.Add(matchUserId, userId);
+                                        matchDic.Add(userId, matchUserId);
+                                    }
+                                    AddLog("匹配成功:" + userId + ":" + matchUserId);
+                                    // 给两方发送战斗匹配消息
+                                    // 获取缓存的匹配数据
+                                    var buffMsgAskBattleRequest = matchDataDic[matchUserId];
+
+                                    // 生成随机种子
+                                    var randomSeed = DateTime.Now.Millisecond;
+                                    // 匹配单位的战斗回复消息
+                                    var msgAskBattleResponse1 =
+                                        MsgFactory.GetMsgAskBattleResponse(msgAskBattleRequest.BaseLevel,
+                                            msgAskBattleRequest.Race, buffMsgAskBattleRequest.BaseLevel,
+                                            buffMsgAskBattleRequest.Race, randomSeed, "");
+
+                                    // 被匹配单位的的战斗回复消息
+                                    var msgAskBattleResponse2 =
+                                        MsgFactory.GetMsgAskBattleResponse(buffMsgAskBattleRequest.BaseLevel,
+                                            buffMsgAskBattleRequest.Race, msgAskBattleRequest.BaseLevel,
+                                            msgAskBattleRequest.Race, randomSeed, "");
+
+                                    // 消息
+                                    // 发送战斗请求回复消息给两方
+                                    SendMsg(idMapSocket[userId],
+                                        PackageData(SocketManager.Serialize(msgAskBattleResponse1), userId, (int)MsgId.MsgAskBattleResponse));
+
+                                    SendMsg(idMapSocket[matchUserId],
+                                        PackageData(SocketManager.Serialize(msgAskBattleResponse2), matchUserId, (int)MsgId.MsgAskBattleResponse));
+                                }
+                                else
+                                {
+                                    // 需要缓存匹配请求数据
+                                    matchDataDic.Add(userId, msgAskBattleRequest);
+                                    // 加入为匹配列表
+                                    unmatchList.Add(userId);
+                                    AddLog("等待匹配:" + userId);
+                                }
+                            }
+                            
+                            // 如果匹配成功则两方发送随机种子
+                            
+                            break;
+                        }
+                            // TODO 应该在匹配后发送随机种子
+                        //case (int) MsgId.MsgRequestRandomSeed:
+                        //{
+                        //    // 随机种子请求
+                        //    // 直接发送
+                        //    // 不转发数据
+                        //    rotateFrom = false;
+                        //    rotateTo = false;
+                        //    // 创建随机种子消息
+                        //    var msgRandomSeed = new MsgRandomSeed()
+                        //    {
+                        //        RandomSeed = DateTime.Now.Millisecond
+                        //    };
+                        //    // 消息
+                        //    // 发送随机种子消息
+                        //    SendMsg(idMapSocket[head.userId],
+                        //        PackageData(SocketManager.Serialize(msgRandomSeed), head.userId, (int) MsgId.MsgRandomSeed));
+                        //    break;
+                        //}
+                        case (int)MsgId.MsgString:
+                            {
+                                // 转发两方
+                                rotateFrom = true;
+                                rotateTo = true;
+                                // 解析数据
+                                while (ByteUtils.CouldRead(copyData))
+                                {
+                                    // 操作数据
+                                    var cOpData = ByteUtils.ReadMsg(ref copyData);
+                                    var cOp = SocketManager.DeSerialize<MsgComfirmOperation>(cOpData);
+                                    AddLog(cOp.OpUniqueNum + "," + cOp.OpParams);
+                                }
+                                break;
+                            }
+                    }
+
+                    // TODO 转发数据
+                    // 判断是否已匹配, 如果匹配则转发数据, 否则不转发
+                    if (matchDic.ContainsKey(userId))
+                    {
+                        // 转发数据
+                        // 序列化转发数据
+                        var serializeData = Serialize(head);
+                        if (rotateTo)
+                        {
+                            // 转发去方
+                            // 获取匹配的Id
+                            var matchUserId = matchDic[userId];
+                            // 该Id对应的Socket
+                            var matchSocket = idMapSocket[matchUserId];
+                            // 打包数据发送
+                            SendMsg(matchSocket, serializeData);
+                        }
+                        if (rotateFrom)
+                        {
+                            // 转发来源方
+                            var toSocket = idMapSocket[userId];
+                            SendMsg(toSocket, serializeData);
                         }
                     }
                     else
                     {
-                        // 加入为匹配列表
-                        unmatchList.Add(userId);
+                        // 没匹配不转发, 输出log
+                        AddLog("没有匹配不转发, userId:" + userId);
                     }
-                }
-
-                // 解析数据
-                while (ByteUtils.CouldRead(head.body))
-                {
-                    // 判断数据类型
-                    switch (head.msgId)
-                    {
-                        case 1:
-                        {
-                            // 操作数据
-                            var opData = ByteUtils.ReadMsg(ref head.body);
-                            var stream = new MemoryStream(opData);
-                            // 解析为类
-                            var opMsg = ProtoBuf.Serializer.Deserialize<MsgOptional>(stream);
-                            AddLog(opMsg.OpPosX + "," + opMsg.OpPosY + "," + opMsg.OpPosZ + ", OpType:" + opMsg.OpType +
-                                   ", OpParams:" + opMsg.OpParams);
-                            break;
-                        }
-                        case 2:
-                        {
-                            while (ByteUtils.CouldRead(head.body))
-                            {
-                                // 操作数据
-                                var strData = ByteUtils.ReadMsg(ref head.body);
-                                // 解析为字符串 字符集: UTF8
-                                var str = Encoding.UTF8.GetString(strData);
-                                AddLog(str);
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                // TODO 转发数据
-                // 判断是否已匹配, 如果匹配则转发数据, 否则不转发
-                if (matchDic.ContainsKey(userId))
-                {
-                    // 转发数据
-                    // 获取匹配的Id
-                    var matchUserId = matchDic[userId];
-                    // 该Id对应的Socket
-                    var matchSocket = idMapSocket[matchUserId];
-                    // 打包数据发送
-                    SendMsg(matchSocket, Serialize(head));
-                }
-                else
-                {
-                    // 没匹配不转发, 输出log
-                    AddLog("没有匹配不转发, userId:" + userId);
                 }
             }
+            
             // TODO 检查断线情况
             foreach (var kv in idMapSocket)
             {
@@ -426,13 +499,22 @@ namespace WindowsFormsApplication1
         /// <summary>
         /// 数据压入缓冲
         /// </summary>
-        private void PushData(MsgHead head)
+        private void PushReceivedData(MsgHead head)
         {
             if (head == null)
             {
                 return;
             }
-            dataList.Add(head);
+            lock (dataList)
+            {
+                dataList.Add(head);
+            }
+        }
+
+
+        private void PushBeSendData()
+        {
+            
         }
 
         /// <summary>
@@ -482,20 +564,20 @@ namespace WindowsFormsApplication1
         //    }
         //}
 
-        /// <summary>
-        /// 解析数据
-        /// </summary>
-        /// <param name="buffer">被解析数据</param>
-        /// <param name="memId">所属用户ID</param>
-        private void AnalysisData(byte[] buffer, int memId)
-        {
-            while (ByteUtils.CouldRead(buffer))
-            {
-                var data = ByteUtils.ReadMsg(ref buffer);
-                var dataStr = Encoding.UTF8.GetString(data);
-                AddLog("数据: " + memId + "," + dataStr);
-            }
-        }
+        ///// <summary>
+        ///// 解析数据
+        ///// </summary>
+        ///// <param name="buffer">被解析数据</param>
+        ///// <param name="memId">所属用户ID</param>
+        //private void AnalysisData(byte[] buffer, int memId)
+        //{
+        //    while (ByteUtils.CouldRead(buffer))
+        //    {
+        //        var data = ByteUtils.ReadMsg(ref buffer);
+        //        var dataStr = Encoding.UTF8.GetString(data);
+        //        AddLog("数据: " + memId + "," + dataStr);
+        //    }
+        //}
 
         ///// <summary>
         ///// 是否为获取数据头

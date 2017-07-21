@@ -45,6 +45,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="msg\MsgComfirmOperation.cs" />
     <Compile Include="msg\MsgHead.cs" />
     <Compile Include="msg\MsgOptional.cs" />
     <Compile Include="Protobuf\BclHelpers.cs" />
