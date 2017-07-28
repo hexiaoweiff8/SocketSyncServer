@@ -397,7 +397,8 @@ public class SocketManager
         }
         catch (Exception ex)
         {
-            throw;
+            Console.WriteLine(ex.Message);
+            return default(T);
         }
     }
 

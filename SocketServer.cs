@@ -68,6 +68,11 @@ namespace WindowsFormsApplication1
         /// </summary>
         private Dictionary<int, MsgAskBattleRequest> matchDataDic = new Dictionary<int, MsgAskBattleRequest>();
 
+        /// <summary>
+        /// 战斗开始请求列表
+        /// </summary>
+        private Dictionary<int, MsgBattleStartRequest> battleStartDataDic = new Dictionary<int, MsgBattleStartRequest>();
+
 
         // -------------------------链接相关----------------------------
 
@@ -86,6 +91,17 @@ namespace WindowsFormsApplication1
         /// 本地套接字
         /// </summary>
         private Socket socket;
+
+        /// <summary>
+        /// 唯一Id起始1
+        /// </summary>
+        private int uniqueIdStartOne = 0xF000;
+
+
+        /// <summary>
+        /// 唯一Id起始2
+        /// </summary>
+        private int uniqueIdStartTwo = 0xF00000;
 
         // ------------------------------事件--------------------------------
 
@@ -305,15 +321,16 @@ namespace WindowsFormsApplication1
                             }
                         case (int)MsgId.MsgComfirmOperation:
                             {
-                                // 不转发
+                                // 转发两方
+                                rotateFrom = true;
+                                rotateTo = true;
                                 // 解析数据
                                 while (ByteUtils.CouldRead(copyData))
                                 {
                                     // 操作数据
-                                    var strData = ByteUtils.ReadMsg(ref copyData);
-                                    // 解析为字符串 字符集: UTF8
-                                    var str = Encoding.UTF8.GetString(strData);
-                                    AddLog(str);
+                                    var cOpData = ByteUtils.ReadMsg(ref copyData);
+                                    var cOp = SocketManager.DeSerialize<MsgComfirmOperation>(cOpData);
+                                    AddLog(cOp.OpUniqueNum + "," + cOp.OpParams);
                                 }
                                 break;
                             }
@@ -360,22 +377,28 @@ namespace WindowsFormsApplication1
                                     // 匹配单位的战斗回复消息
                                     var msgAskBattleResponse1 =
                                         MsgFactory.GetMsgAskBattleResponse(msgAskBattleRequest.BaseLevel,
+                                            msgAskBattleRequest.TurretLevel,
                                             msgAskBattleRequest.Race, buffMsgAskBattleRequest.BaseLevel,
-                                            buffMsgAskBattleRequest.Race, randomSeed, "");
+                                            buffMsgAskBattleRequest.TurretLevel,
+                                            buffMsgAskBattleRequest.Race, uniqueIdStartOne, randomSeed, "");
 
                                     // 被匹配单位的的战斗回复消息
                                     var msgAskBattleResponse2 =
                                         MsgFactory.GetMsgAskBattleResponse(buffMsgAskBattleRequest.BaseLevel,
+                                            buffMsgAskBattleRequest.TurretLevel,
                                             buffMsgAskBattleRequest.Race, msgAskBattleRequest.BaseLevel,
-                                            msgAskBattleRequest.Race, randomSeed, "");
+                                            msgAskBattleRequest.TurretLevel,
+                                            msgAskBattleRequest.Race, uniqueIdStartTwo, randomSeed, "");
 
                                     // 消息
                                     // 发送战斗请求回复消息给两方
                                     SendMsg(idMapSocket[userId],
-                                        PackageData(SocketManager.Serialize(msgAskBattleResponse1), userId, (int)MsgId.MsgAskBattleResponse));
+                                        PackageData(SocketManager.Serialize(msgAskBattleResponse1), userId,
+                                            (int) MsgId.MsgAskBattleResponse));
 
                                     SendMsg(idMapSocket[matchUserId],
-                                        PackageData(SocketManager.Serialize(msgAskBattleResponse2), matchUserId, (int)MsgId.MsgAskBattleResponse));
+                                        PackageData(SocketManager.Serialize(msgAskBattleResponse2), matchUserId,
+                                            (int) MsgId.MsgAskBattleResponse));
                                 }
                                 else
                                 {
@@ -387,11 +410,62 @@ namespace WindowsFormsApplication1
                                 }
                             }
                             
-                            // 如果匹配成功则两方发送随机种子
-                            
                             break;
                         }
-                            // TODO 应该在匹配后发送随机种子
+                        // 战斗开始请求
+                        case (int) MsgId.MsgBattleStartRequest:
+                        {
+                            byte[] msgBattleStartRequestData = ByteUtils.CouldRead(copyData)
+                                ? ByteUtils.ReadMsg(ref copyData)
+                                : null;
+
+                            if (msgBattleStartRequestData == null)
+                            {
+                                AddLog("Error:请求战斗数据为空");
+                                continue;
+                            }
+
+                            // 反序列化战斗开始请求数据
+                            var msgBattleStartRequest =
+                                SocketManager.DeSerialize<MsgBattleStartRequest>(msgBattleStartRequestData);
+
+                            if (matchDic.ContainsKey(userId))
+                            {
+                                var matchId = matchDic[userId];
+                                // 检查是否匹配方也发送了战斗开始请求
+                                if (battleStartDataDic.ContainsKey(matchId))
+                                {
+                                    // 如果有则给两方发送战斗开始回复
+                                    // 匹配单位的战斗回复消息
+                                    var msgBattleStartResponse1 = MsgFactory.GetMsgBattleStartResponse("");
+
+                                    // 被匹配单位的的战斗回复消息
+                                    var msgBattleStartResponse2 = MsgFactory.GetMsgBattleStartResponse("");
+                                    // 消息
+                                    // 发送战斗请求回复消息给两方
+                                    SendMsg(idMapSocket[userId],
+                                        PackageData(SocketManager.Serialize(msgBattleStartResponse1), userId,
+                                            (int) MsgId.MsgBattleStartResponse));
+
+                                    SendMsg(idMapSocket[matchId],
+                                        PackageData(SocketManager.Serialize(msgBattleStartResponse2), matchId,
+                                            (int)MsgId.MsgBattleStartResponse));
+                                }
+                                else
+                                {
+                                    // 否则放入等待列表
+                                    battleStartDataDic.Add(userId, msgBattleStartRequest);
+                                }
+                            }
+                            else
+                            {
+                                AddLog("单位未匹配:" + userId);
+                            }
+
+
+                            break;
+                        }
+                        // TODO 应该在匹配后发送随机种子
                         //case (int) MsgId.MsgRequestRandomSeed:
                         //{
                         //    // 随机种子请求
@@ -411,34 +485,34 @@ namespace WindowsFormsApplication1
                         //    break;
                         //}
                         case (int)MsgId.MsgString:
+                        {
+                            // 不转发
+                            // 解析数据
+                            while (ByteUtils.CouldRead(copyData))
                             {
-                                // 转发两方
-                                rotateFrom = true;
-                                rotateTo = true;
-                                // 解析数据
-                                while (ByteUtils.CouldRead(copyData))
-                                {
-                                    // 操作数据
-                                    var cOpData = ByteUtils.ReadMsg(ref copyData);
-                                    var cOp = SocketManager.DeSerialize<MsgComfirmOperation>(cOpData);
-                                    AddLog(cOp.OpUniqueNum + "," + cOp.OpParams);
-                                }
-                                break;
+                                // 操作数据
+                                var strData = ByteUtils.ReadMsg(ref copyData);
+                                // 解析为字符串 字符集: UTF8
+                                var str = Encoding.UTF8.GetString(strData);
+                                AddLog(str);
                             }
+                            break;
+                        }
                     }
 
                     // TODO 转发数据
                     // 判断是否已匹配, 如果匹配则转发数据, 否则不转发
                     if (matchDic.ContainsKey(userId))
                     {
+
+                        // 获取匹配的Id
+                        var matchUserId = matchDic[userId];
                         // 转发数据
                         // 序列化转发数据
                         var serializeData = Serialize(head);
                         if (rotateTo)
                         {
                             // 转发去方
-                            // 获取匹配的Id
-                            var matchUserId = matchDic[userId];
                             // 该Id对应的Socket
                             var matchSocket = idMapSocket[matchUserId];
                             // 打包数据发送
@@ -450,6 +524,7 @@ namespace WindowsFormsApplication1
                             var toSocket = idMapSocket[userId];
                             SendMsg(toSocket, serializeData);
                         }
+                        AddLog("转发数据成功:" + userId + "," + matchUserId);
                     }
                     else
                     {
